@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Upload Telemetry - TrustSphere</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; background: #0a0e1a; color: #e0e6f0; }
+        .navbar { background: #111827; padding: 16px 32px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e3a5f; }
+        .logo { font-size: 22px; font-weight: 700; color: #3b9eff; }
+        .nav-links a { color: #94a3b8; text-decoration: none; margin-left: 24px; font-size: 14px; }
+        .nav-links a:hover { color: #3b9eff; }
+        .container { padding: 32px; max-width: 600px; margin: 0 auto; }
+        .page-title { font-size: 24px; font-weight: 600; margin-bottom: 8px; }
+        .page-subtitle { color: #64748b; font-size: 14px; margin-bottom: 32px; }
+        .upload-card { background: #111827; border: 1px solid #1e3a5f; border-radius: 12px; padding: 32px; }
+        .drop-zone {
+            border: 2px dashed #1e3a5f;
+            border-radius: 8px;
+            padding: 48px;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.2s;
+            margin-bottom: 24px;
+        }
+        .drop-zone:hover { border-color: #3b9eff; }
+        .drop-zone p { color: #64748b; margin-top: 8px; font-size: 14px; }
+        .drop-icon { font-size: 48px; margin-bottom: 12px; }
+        input[type="file"] { display: none; }
+        .upload-btn {
+            background: #3b9eff;
+            color: white;
+            border: none;
+            padding: 12px 32px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+        }
+        .upload-btn:hover { background: #2563eb; }
+        .upload-btn:disabled { background: #1e3a5f; cursor: not-allowed; }
+        .status { margin-top: 16px; padding: 12px; border-radius: 8px; display: none; }
+        .status.success { background: #064e3b; color: #6ee7b7; }
+        .status.error { background: #4c0519; color: #fca5a5; }
+        .file-name { color: #3b9eff; margin-top: 8px; font-size: 14px; }
+        .back-link { display: inline-block; margin-top: 16px; color: #64748b; text-decoration: none; font-size: 14px; }
+        .back-link:hover { color: #3b9eff; }
+        .fields-info { background: #0f172a; border-radius: 8px; padding: 16px; margin-bottom: 24px; font-size: 13px; color: #64748b; }
+        .fields-info strong { color: #94a3b8; }
+    </style>
+</head>
+<body>
+
+<nav class="navbar">
+    <div class="logo">🛡 TrustSphere</div>
+    <div class="nav-links">
+        <a href="/">Dashboard</a>
+        <a href="/upload-page">Upload Data</a>
+    </div>
+</nav>
+
+<div class="container">
+    <div class="page-title">Upload Telemetry Data</div>
+    <div class="page-subtitle">Upload a CSV file to analyze IoT device behavior</div>
+
+    <div class="upload-card">
+        <div class="fields-info">
+            <strong>Required CSV columns:</strong><br>
+            device_id, timestamp, packets_per_min, port_used, destination_ip, failed_connections
+        </div>
+
+        <div class="drop-zone" onclick="document.getElementById('fileInput').click()">
+            <div class="drop-icon">📁</div>
+            <strong>Click to select CSV file</strong>
+            <p>or drag and drop here</p>
+            <div id="file-name" class="file-name"></div>
+        </div>
+
+        <input type="file" id="fileInput" accept=".csv">
+
+        <button class="upload-btn" id="uploadBtn" onclick="uploadFile()" disabled>
+            Upload & Analyze
+        </button>
+
+        <div id="status" class="status"></div>
+
+        <a href="/" class="back-link">← Back to Dashboard</a>
+    </div>
+</div>
+
+<script>
+    const fileInput = document.getElementById('fileInput');
+    const uploadBtn = document.getElementById('uploadBtn');
+    const status = document.getElementById('status');
+    const fileName = document.getElementById('file-name');
+
+    fileInput.addEventListener('change', function() {
+        if (this.files.length > 0) {
+            fileName.textContent = this.files[0].name;
+            uploadBtn.disabled = false;
+        }
+    });
+
+    function uploadFile() {
+        const file = fileInput.files[0];
+        if (!file) return;
+
+        uploadBtn.disabled = true;
+        uploadBtn.textContent = 'Processing...';
+        status.style.display = 'none';
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        fetch('/api/upload', {
+            method: 'POST',
+            body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                status.className = 'status success';
+                status.textContent = `✓ ${data.message}. Redirecting to dashboard...`;
+                status.style.display = 'block';
+                setTimeout(() => window.location.href = '/', 2000);
+            } else {
+                status.className = 'status error';
+                status.textContent = '✗ Error: ' + data.error;
+                status.style.display = 'block';
+                uploadBtn.disabled = false;
+                uploadBtn.textContent = 'Upload & Analyze';
+            }
+        })
+        .catch(() => {
+            status.className = 'status error';
+            status.textContent = '✗ Connection error. Is the server running?';
+            status.style.display = 'block';
+            uploadBtn.disabled = false;
+            uploadBtn.textContent = 'Upload & Analyze';
+        });
+    }
+</script>
+</body>
+</html>

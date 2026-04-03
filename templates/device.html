@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Device Detail - TrustSphere</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; background: #0a0e1a; color: #e0e6f0; }
+        .navbar { background: #111827; padding: 16px 32px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e3a5f; }
+        .logo { font-size: 22px; font-weight: 700; color: #3b9eff; }
+        .nav-links a { color: #94a3b8; text-decoration: none; margin-left: 24px; font-size: 14px; }
+        .nav-links a:hover { color: #3b9eff; }
+        .container { padding: 32px; max-width: 1400px; margin: 0 auto; }
+        .back-link { color: #64748b; text-decoration: none; font-size: 14px; display: inline-block; margin-bottom: 24px; }
+        .back-link:hover { color: #3b9eff; }
+
+        .top-row { display: grid; grid-template-columns: 300px 1fr; gap: 24px; margin-bottom: 24px; }
+
+        .score-card { background: #111827; border: 1px solid #1e3a5f; border-radius: 12px; padding: 28px; text-align: center; }
+        .device-name { font-size: 16px; font-weight: 700; margin-bottom: 16px; color: #64748b; text-transform: uppercase; letter-spacing: 1px; }
+        .big-score { font-size: 88px; font-weight: 800; line-height: 1; }
+        .score-label { font-size: 13px; color: #64748b; margin-top: 4px; }
+        .severity-badge { display: inline-block; padding: 8px 24px; border-radius: 20px; font-size: 14px; font-weight: 700; margin-top: 14px; }
+
+        .score-meta { margin-top: 24px; text-align: left; }
+        .meta-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #1e293b; font-size: 13px; }
+        .meta-row:last-child { border-bottom: none; }
+        .meta-label { color: #64748b; }
+        .meta-value { color: #e0e6f0; font-weight: 600; }
+
+        /* Penalty gauge */
+        .penalty-gauge { margin-top: 20px; }
+        .gauge-label { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+        .gauge-bar-bg { width: 100%; height: 10px; background: #1e293b; border-radius: 5px; overflow: hidden; }
+        .gauge-bar-fill { height: 100%; border-radius: 5px; }
+
+        .explain-card { background: #111827; border: 1px solid #1e3a5f; border-radius: 12px; padding: 28px; }
+
+        .section-title { font-size: 11px; font-weight: 700; color: #3b9eff; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; margin-top: 24px; padding-bottom: 6px; border-bottom: 1px solid #1e293b; }
+        .section-title:first-child { margin-top: 0; }
+
+        .summary-text { font-size: 14px; color: #cbd5e1; line-height: 1.8; }
+
+        .reason-item { background: #0f172a; border-left: 3px solid #3b9eff; padding: 12px 16px; border-radius: 0 8px 8px 0; margin-bottom: 8px; font-size: 13px; color: #94a3b8; line-height: 1.7; }
+        .reason-item.violation { border-left-color: #f87171; background: #1a0a0a; }
+        .reason-item.ml { border-left-color: #a78bfa; background: #0f0a1a; }
+        .reason-item.clean { border-left-color: #34d399; background: #0a1a12; color: #6ee7b7; }
+        .reason-item.warning { border-left-color: #fbbf24; background: #1a1200; }
+
+        /* Dimension breakdown cards */
+        .dimensions-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-top: 8px; }
+        .dimension-card { background: #0f172a; border-radius: 8px; padding: 14px; text-align: center; border: 1px solid #1e293b; }
+        .dimension-name { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+        .dimension-penalty { font-size: 24px; font-weight: 800; }
+        .dimension-cap { font-size: 10px; color: #64748b; margin-top: 4px; }
+        .dimension-bar-bg { width: 100%; height: 4px; background: #1e293b; border-radius: 2px; margin-top: 8px; overflow: hidden; }
+        .dimension-bar-fill { height: 100%; border-radius: 2px; }
+
+        /* Formula display */
+        .formula-box { background: #0f172a; border: 1px solid #1e3a5f; border-radius: 8px; padding: 16px; font-family: 'Courier New', monospace; font-size: 13px; color: #94a3b8; line-height: 2; }
+        .formula-highlight { color: #3b9eff; font-weight: 700; }
+        .formula-result { color: #34d399; font-weight: 700; font-size: 15px; }
+        .formula-penalty { color: #f87171; }
+
+        /* History timeline */
+        .history-card { background: #111827; border: 1px solid #1e3a5f; border-radius: 12px; padding: 28px; margin-top: 24px; }
+        .timeline-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #0f172a; }
+        .timeline-row:last-child { border-bottom: none; }
+        .timeline-date { font-size: 12px; color: #64748b; width: 170px; flex-shrink: 0; }
+        .timeline-bar-bg { flex: 1; height: 8px; background: #1e293b; border-radius: 4px; overflow: hidden; }
+        .timeline-bar-fill { height: 100%; border-radius: 4px; }
+        .timeline-score { font-size: 14px; font-weight: 700; width: 40px; text-align: right; flex-shrink: 0; }
+        .timeline-severity { width: 100px; flex-shrink: 0; font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 10px; text-align: center; }
+        .timeline-change { width: 55px; flex-shrink: 0; font-size: 12px; font-weight: 700; text-align: right; }
+
+        .tabs { display: flex; gap: 4px; margin-bottom: 20px; }
+        .tab { padding: 8px 20px; border-radius: 8px; font-size: 13px; cursor: pointer; color: #64748b; background: #0f172a; border: 1px solid #1e293b; }
+        .tab.active { background: #1e3a5f; color: #3b9eff; border-color: #3b9eff; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        .telemetry-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .telemetry-table th { background: #0f172a; padding: 10px 14px; text-align: left; font-size: 11px; color: #64748b; text-transform: uppercase; }
+        .telemetry-table td { padding: 10px 14px; border-bottom: 1px solid #0f172a; color: #94a3b8; }
+
+        .loading { color: #64748b; padding: 48px; text-align: center; font-size: 15px; }
+
+        /* Severity scale */
+        .severity-scale { display: flex; gap: 4px; margin-top: 8px; }
+        .scale-block { flex: 1; height: 6px; border-radius: 3px; }
+        .scale-labels { display: flex; justify-content: space-between; font-size: 10px; color: #64748b; margin-top: 4px; }
+        .scale-pointer { position: relative; }
+    </style>
+</head>
+<body>
+
+<nav class="navbar">
+    <div class="logo">🛡 TrustSphere</div>
+    <div class="nav-links">
+        <a href="/">Dashboard</a>
+        <a href="/upload-page">Upload Data</a>
+    </div>
+</nav>
+
+<div class="container">
+    <a href="/" class="back-link">← Back to Dashboard</a>
+    <div id="content"><div class="loading">Loading device analysis...</div></div>
+</div>
+
+<script>
+    const deviceId = window.location.pathname.split('/').pop();
+    const urlParams = new URLSearchParams(window.location.search);
+    const viewParam = urlParams.get('view') || 'current';
+
+    function getScoreColor(score) {
+        if (score >= 80) return '#34d399';
+        if (score >= 60) return '#60a5fa';
+        if (score >= 40) return '#fbbf24';
+        if (score >= 20) return '#f87171';
+        return '#e879f9';
+    }
+
+    function getBadgeStyle(severity) {
+        const map = {
+            'Trusted':     'background:#064e3b;color:#6ee7b7',
+            'Low Risk':    'background:#1e3a5f;color:#93c5fd',
+            'Medium Risk': 'background:#422006;color:#fcd34d',
+            'High Risk':   'background:#4c0519;color:#fca5a5',
+            'Critical':    'background:#3b0764;color:#e879f9'
+        };
+        return map[severity] || map['Low Risk'];
+    }
+
+    function switchTab(tabId) {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+        document.getElementById('tab-' + tabId).classList.add('active');
+        document.getElementById('content-' + tabId).classList.add('active');
+        event.target.classList.add('active');
+    }
+
+    Promise.all([
+        fetch(`/api/device/${deviceId}`).then(r => r.json()),
+        fetch(`/api/explain/${deviceId}?view=${viewParam}`).then(r => r.json())
+    ]).then(([device, explain]) => {
+        if (explain.error) {
+            document.getElementById('content').innerHTML = `
+                <div class="loading" style="padding-top:64px">
+                    <h3 style="color:#e0e6f0; margin-bottom:8px">Explanation Unavailable</h3>
+                    <p>${explain.error}</p>
+                    <button onclick="window.history.back()" style="margin-top:24px; padding:8px 16px; background:#1e3a5f; color:white; border:none; border-radius:8px; cursor:pointer;" onmouseover="this.style.background='#2a4c7a'" onmouseout="this.style.background='#1e3a5f'">Go Back</button>
+                    ${viewParam === 'previous' ? '<a href="/device-page/' + deviceId + '?view=current" style="display:inline-block; margin-left:12px; margin-top:24px; padding:8px 16px; background:#3b9eff; color:white; border-radius:8px; text-decoration:none;">View Current Score</a>' : ''}
+                </div>
+            `;
+            return;
+        }
+
+        const color = getScoreColor(device.trust_score);
+        const rb = explain.risk_breakdown || {};
+        const hardP = rb.hard_violation_penalty || 0;
+        const driftP = rb.drift_penalty || 0;
+        const mlP = rb.ml_anomaly_penalty || 0;
+        const totalP = rb.total_penalty || 0;
+
+        // Dimension cards
+        function dimCard(name, penalty, icon) {
+            const c = penalty === 0 ? '#34d399' : penalty <= 10 ? '#fbbf24' : '#f87171';
+            const pct = (penalty / 30) * 100;
+            return `
+                <div class="dimension-card">
+                    <div class="dimension-name">${icon} ${name}</div>
+                    <div class="dimension-penalty" style="color:${c}">
+                        ${penalty === 0 ? '0' : '-' + penalty}
+                    </div>
+                    <div class="dimension-cap">/ -30 max</div>
+                    <div class="dimension-bar-bg">
+                        <div class="dimension-bar-fill" style="width:${pct}%;background:${c}"></div>
+                    </div>
+                </div>`;
+        }
+
+        // Violation items
+        let violationsHtml = '';
+        (explain.hard_violations || []).forEach(r => {
+            const isClean = r.includes('No policy');
+            violationsHtml += `<div class="reason-item ${isClean ? 'clean' : 'violation'}">${r}</div>`;
+        });
+
+        // Drift items
+        let driftHtml = '';
+        (explain.drift_signals || []).forEach(r => {
+            const isClean = r.includes('No behavioral') || r.includes('No drift');
+            const isWarning = r.includes('Early drift');
+            violationsHtml; // just reference
+            driftHtml += `<div class="reason-item ${isClean ? 'clean' : isWarning ? 'warning' : ''}">${r}</div>`;
+        });
+
+        // History timeline
+        const history = device.history || [];
+        let timelineHtml = '';
+        if (history.length === 0) {
+            timelineHtml = '<div style="color:#64748b;text-align:center;padding:24px">No history yet</div>';
+        } else {
+            timelineHtml += `
+                <div class="timeline-row" style="font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:0.5px">
+                    <div class="timeline-date">Timestamp</div>
+                    <div class="timeline-bar-bg" style="background:transparent;height:auto">Score Bar</div>
+                    <div class="timeline-score">Score</div>
+                    <div class="timeline-severity">Risk Level</div>
+                    <div class="timeline-change">Δ Change</div>
+                </div>`;
+            history.forEach((h, i) => {
+                const c = getScoreColor(h.trust_score);
+                const prev = i > 0 ? history[i-1].trust_score : h.trust_score;
+                const change = +(h.trust_score - prev).toFixed(1);
+                const changeHtml = i === 0 ? '<span style="color:#64748b">start</span>' :
+                    change > 0 ? `<span style="color:#34d399">▲+${change}</span>` :
+                    change < 0 ? `<span style="color:#f87171">▼${change}</span>` :
+                    `<span style="color:#64748b">—</span>`;
+                timelineHtml += `
+                    <div class="timeline-row">
+                        <div class="timeline-date">${h.timestamp}</div>
+                        <div class="timeline-bar-bg">
+                            <div class="timeline-bar-fill" style="width:${h.trust_score}%;background:${c}"></div>
+                        </div>
+                        <div class="timeline-score" style="color:${c}">${h.trust_score}</div>
+                        <div class="timeline-severity" style="${getBadgeStyle(h.severity)}">${h.severity}</div>
+                        <div class="timeline-change">${changeHtml}</div>
+                    </div>`;
+            });
+        }
+
+        // Telemetry table
+        let telemetryHtml = '';
+        const pl = device.policy_limits || {};
+        const capP = pl.hard_traffic_cap || 500;
+        const maxF = pl.max_failed_connections || 50;
+        const appPorts = pl.approved_ports || [];
+        const appIps = pl.approved_ip_prefixes || [];
+
+        (device.recent_telemetry || []).forEach(t => {
+            const isSpike = t.packets_per_min > capP;
+            const isDrift = device.baseline_packets && t.packets_per_min > (device.baseline_packets * 1.5);
+            const pColor = isSpike ? '#f87171' : isDrift ? '#fbbf24' : '#e0e6f0';
+            const pSub = device.baseline_packets 
+                ? `<div style="font-size:10px;color:#64748b">Base: ${device.baseline_packets.toFixed(0)} | Cap: ${capP}</div>`
+                : `<div style="font-size:10px;color:#64748b">Cap: ${capP}</div>`;
+
+            const isBadPort = !appPorts.includes(t.port_used);
+            const portColor = isBadPort ? '#f87171' : '#e0e6f0';
+            const portSub = `<div style="font-size:10px;color:#64748b">Approved: ${appPorts.slice(0,3).join(',')}${appPorts.length>3?'...':''}</div>`;
+
+            const isBadIp = !appIps.some(prefix => t.destination_ip.startsWith(prefix));
+            const ipColor = isBadIp ? '#f87171' : '#e0e6f0';
+            const ipSub = `<div style="font-size:10px;color:#64748b">Prefixes: ${appIps.slice(0,3).join(',')}${appIps.length>3?'...':''}</div>`;
+
+            const isBadFail = t.failed_connections > maxF;
+            const failColor = isBadFail ? '#f87171' : '#e0e6f0';
+            const failSub = `<div style="font-size:10px;color:#64748b">Max: ${maxF}</div>`;
+
+            telemetryHtml += `
+                <tr>
+                    <td style="vertical-align:top">${t.timestamp}</td>
+                    <td style="vertical-align:top">
+                        <span style="color:${pColor};font-weight:${isSpike||isDrift?'700':'400'}">${t.packets_per_min}</span>
+                        ${pSub}
+                    </td>
+                    <td style="vertical-align:top">
+                        <span style="color:${portColor};font-weight:${isBadPort?'700':'400'}">${t.port_used}</span>
+                        ${portSub}
+                    </td>
+                    <td style="vertical-align:top">
+                        <span style="color:${ipColor};font-weight:${isBadIp?'700':'400'}">${t.destination_ip}</span>
+                        ${ipSub}
+                    </td>
+                    <td style="vertical-align:top">
+                        <span style="color:${failColor};font-weight:${isBadFail?'700':'400'}">${t.failed_connections}</span>
+                        ${failSub}
+                    </td>
+                </tr>`;
+        });
+
+        document.getElementById('content').innerHTML = `
+
+        <div class="top-row">
+
+            <!-- Score Card -->
+            <div class="score-card">
+                <div class="device-name">
+                    ${deviceId}
+                    <span onclick="window.location='/device-page/${deviceId}?view=${viewParam === 'previous' ? 'current' : 'previous'}'" style="cursor:pointer;display:inline-block;margin-left:8px;padding:2px 8px;border-radius:12px;font-size:10px;text-transform:none;${viewParam === 'previous' ? 'background:#1e3a5f;color:#93c5fd' : 'background:#064e3b;color:#6ee7b7'}" title="${viewParam === 'previous' ? 'Switch to Current Score Explanation' : 'Switch to Historical Score Explanation'}">
+                        ${viewParam === 'previous' ? 'Historical Explanation (Click to View Current)' : 'Current Explanation (Click to View Previous)'}
+                    </span>
+                </div>
+                <div class="big-score" style="color:${color}">${explain.trust_score !== undefined ? explain.trust_score : device.trust_score}</div>
+                <div class="score-label">out of 100</div>
+                <div class="severity-badge" style="${getBadgeStyle(explain.severity || device.severity)}">
+                    ${explain.severity || device.severity}
+                </div>
+
+                <div class="penalty-gauge" style="margin-top:20px">
+                    <div class="gauge-label">Total Penalty Applied</div>
+                    <div class="gauge-bar-bg">
+                        <div class="gauge-bar-fill"
+                             style="width:${Math.min(totalP,100)}%;
+                                    background:${totalP===0?'#34d399':totalP<30?'#fbbf24':'#f87171'}">
+                        </div>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;font-size:11px;color:#64748b;margin-top:4px">
+                        <span>-${totalP} pts applied</span>
+                        <span>max -90</span>
+                    </div>
+                </div>
+
+                <div class="score-meta">
+                    <div class="meta-row">
+                        <span class="meta-label">Drift Streak</span>
+                        <span class="meta-value" style="color:${device.drift_streak>=3?'#f87171':'#94a3b8'}">
+                            ${device.drift_streak || 0} hours
+                        </span>
+                    </div>
+                    <div class="meta-row">
+                        <span class="meta-label">Mode</span>
+                        <span class="meta-value" style="color:#93c5fd;font-weight:700;">
+                            ${device.mode || 'NORMAL'}
+                        </span>
+                    </div>
+                    <div class="meta-row">
+                        <span class="meta-label">Baseline Traffic</span>
+                        <span class="meta-value">
+                            ${device.baseline_packets ? device.baseline_packets.toFixed(1)+' pkt/min' : 'Not established'}
+                        </span>
+                    </div>
+                    <div class="meta-row">
+                        <span class="meta-label">Hard Penalty</span>
+                        <span class="meta-value" style="color:${hardP>0?'#f87171':'#34d399'}">
+                            ${hardP > 0 ? '-'+hardP+' pts' : 'None'}
+                        </span>
+                    </div>
+                    <div class="meta-row">
+                        <span class="meta-label">Drift Penalty</span>
+                        <span class="meta-value" style="color:${driftP>0?'#fbbf24':'#34d399'}">
+                            ${driftP > 0 ? '-'+driftP+' pts' : 'None'}
+                        </span>
+                    </div>
+                    <div class="meta-row">
+                        <span class="meta-label">ML Penalty</span>
+                        <span class="meta-value" style="color:${mlP>0?'#a78bfa':'#34d399'}">
+                            ${mlP > 0 ? '-'+mlP+' pts' : 'None'}
+                        </span>
+                    </div>
+                    <div class="meta-row">
+                        <span class="meta-label">Last Updated</span>
+                        <span class="meta-value">
+                            ${device.last_updated ? new Date(device.last_updated).toLocaleDateString() : '—'}
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Explainability Card -->
+            <div class="explain-card">
+
+                <div class="section-title">🧠 Behavioral Summary</div>
+                <div class="section-title">📊 Traffic Context</div>
+                <div class="reason-item">${explain.traffic_context || 'No traffic context available.'}</div>
+
+                <div class="section-title">🔴 Hard Policy Violations</div>
+                <div style="font-size:12px;color:#64748b;margin-bottom:8px">
+                    Deterministic rule checks — binary pass/fail. Fires immediately on detection.
+                    Each violation contributes to the Communication, Port, Failure Rate, or Volume dimension.
+                </div>
+                ${violationsHtml || '<div class="reason-item clean">No policy violations detected this cycle.</div>'}
+
+                <div class="section-title">📈 Behavioral Drift Signals</div>
+                <div style="font-size:12px;color:#64748b;margin-bottom:8px">
+                    Statistical deviation from established baseline.
+                    Formula: Drift% = ((Current − Baseline) / Baseline) × 100.
+                    Sudden spike threshold: >50%. Sustained drift: >30% for 6 consecutive hours.
+                </div>
+                ${driftHtml || '<div class="reason-item clean">No drift signals detected this cycle.</div>'}
+
+                <div class="section-title">🛡️ Global Threat Intelligence</div>
+                <div style="font-size:12px;color:#64748b;margin-bottom:8px">
+                    Cross-references destination IPs against known global botnet and malware signatures.
+                </div>
+                <div class="reason-item ${explain.threat_intel && explain.threat_intel.includes('CRITICAL MATCH') ? 'violation' : 'clean'}">
+                    ${explain.threat_intel || 'No threat intelligence available this cycle.'}
+                </div>
+
+                <div class="section-title">🤖 ML Anomaly Assessment (Isolation Forest)</div>
+                <div style="font-size:12px;color:#64748b;margin-bottom:8px">
+                    Unsupervised learning model trained on device behavioral history.
+                    Scores 0–1 where higher = more anomalous. Penalty threshold: score > 0.7.
+                    ML is supportive — it amplifies but does not replace rule-based detection.
+                </div>
+                <div class="reason-item ml">${explain.ml_interpretation || ''}</div>
+
+                ${(explain.remediation_playbooks && explain.remediation_playbooks.length > 0) ? `
+                <div class="section-title" style="margin-top:32px;">⚡ Automated Remediation Playbook</div>
+                <div style="font-size:12px;color:#64748b;margin-bottom:8px">
+                    Recommended Security Orchestration, Automation, and Response (SOAR) actions based on current threat profile.
+                </div>
+                ${explain.remediation_playbooks.map(pb => {
+                    const isUrgent = pb.includes("IMMEDIATE");
+                    const isAllClear = pb.includes("ALL CLEAR");
+                    const styleClass = isUrgent ? "violation" : isAllClear ? "clean" : "warning";
+                    return '<div class="reason-item ' + styleClass + '">' + pb + '</div>';
+                }).join('')}
+                ` : ''}
+
+            </div>
+        </div>
+
+        <!-- Dimensional Risk Breakdown -->
+        <div class="explain-card" style="margin-bottom:24px">
+
+            <div class="section-title">📐 Dimensional Risk Score Breakdown</div>
+            <div style="font-size:12px;color:#64748b;margin-bottom:16px">
+                Risk is measured across 5 behavioral dimensions. Each dimension is independently
+                capped at -30 points to prevent any single signal from dominating the score.
+                This ensures a port violation cannot mask a traffic anomaly, and vice versa.
+            </div>
+
+            <div class="dimensions-grid">
+                ${dimCard('Volume', Math.min(driftP, 30), '📶')}
+                ${dimCard('Communication', Math.min(hardP > 0 ? Math.floor(hardP*0.6) : 0, 30), '🌐')}
+                ${dimCard('Port', Math.min(hardP > 0 ? Math.floor(hardP*0.4) : 0, 30), '🔌')}
+                ${dimCard('Failure Rate', 0, '❌')}
+                ${dimCard('ML Anomaly', Math.min(mlP, 30), '🤖')}
+            </div>
+
+            <div class="section-title" style="margin-top:24px">🧮 Trust Score Formula</div>
+            <div class="formula-box">
+                <span class="formula-highlight">Trust Score</span> = max(0, Score_Before − Total_Penalty)<br>
+                <span class="formula-highlight">Total_Penalty</span> = Hard_Penalty + Drift_Penalty + ML_Penalty<br>
+                <br>
+                = <span class="formula-penalty">${hardP}</span> (hard violations)
+                + <span class="formula-penalty">${driftP}</span> (drift)
+                + <span class="formula-penalty">${mlP}</span> (ML anomaly)<br>
+                = ${totalP === 0
+                    ? '<span style="color:#34d399">Total penalty = 0 &rarr; Recovery +5 applied</span>'
+                    : `Total penalty of <span class="formula-penalty">${totalP} points</span>`}<br>
+                <br>
+                <span class="formula-highlight">Final Score</span> = ${totalP === 0
+                    ? `max(0, ${explain.score_before !== undefined ? explain.score_before : device.trust_score} + 5 recovery)`
+                    : `max(0, ${explain.score_before !== undefined ? explain.score_before : device.trust_score} − ${totalP})`}
+                = <span class="formula-result">${explain.trust_score !== undefined ? explain.trust_score : device.trust_score}</span>
+                → <span style="color:#fbbf24">${explain.severity || device.severity}</span>
+            </div>
+
+            <div class="section-title" style="margin-top:20px">🎯 Severity Classification Scale</div>
+            <div style="font-size:12px;color:#64748b;margin-bottom:10px">
+                Where does this device's score fall on the risk spectrum?
+            </div>
+            <div class="severity-scale">
+                <div class="scale-block" style="background:#3b0764;flex:2"></div>
+                <div class="scale-block" style="background:#4c0519;flex:2"></div>
+                <div class="scale-block" style="background:#422006;flex:2"></div>
+                <div class="scale-block" style="background:#1e3a5f;flex:2"></div>
+                <div class="scale-block" style="background:#064e3b;flex:2"></div>
+            </div>
+            <div class="scale-labels">
+                <span>0 Critical</span>
+                <span>20 High</span>
+                <span>40 Medium</span>
+                <span>60 Low</span>
+                <span>80 Trusted 100</span>
+            </div>
+            <div style="font-size:12px;color:#94a3b8;margin-top:10px">
+                ${explain.severity_reasoning || ''}
+            </div>
+
+            <div class="section-title" style="margin-top:20px">🔄 Recovery Logic</div>
+            <div style="font-size:12px;color:#64748b;line-height:1.8">
+                If <strong style="color:#94a3b8">no penalties are applied</strong> in a cycle,
+                this device recovers <strong style="color:#34d399">+5 points</strong> toward 100.
+                Recovery is gradual — not instant — to prevent attackers from exploiting
+                pause-and-resume behavior to reset trust artificially.
+                ${totalP === 0 ?
+                    '<br><span style="color:#34d399">✓ This device is currently in recovery mode.</span>' :
+                    '<br><span style="color:#f87171">✗ Recovery paused — active penalties detected.</span>'
+                }
+            </div>
+        </div>
+
+        <!-- History + Telemetry -->
+        <div class="history-card">
+            <div class="tabs">
+                <div class="tab active" id="tab-history" onclick="switchTab('history')">📈 Full Trust Score History</div>
+                <div class="tab" id="tab-telemetry" onclick="switchTab('telemetry')">📋 Raw Telemetry</div>
+            </div>
+
+            <div id="content-history" class="tab-content active">
+                <div style="font-size:12px;color:#64748b;margin-bottom:16px">
+                    Complete record of every trust score calculation for this device.
+                    Each row represents one telemetry processing cycle.
+                </div>
+                <div style="background:#0f172a; padding:16px; border-radius:8px; border:1px solid #1e293b; margin-bottom:24px;">
+                    <canvas id="trustChart" style="width:100%; height:180px;"></canvas>
+                </div>
+                <div>${timelineHtml}</div>
+            </div>
+
+            <div id="content-telemetry" class="tab-content">
+                <div style="font-size:12px;color:#64748b;margin-bottom:16px">
+                    Most recent telemetry records received from this device.
+                </div>
+                <table class="telemetry-table">
+                    <thead>
+                        <tr>
+                            <th>Timestamp</th>
+                            <th>Packets/min</th>
+                            <th>Port Used</th>
+                            <th>Destination IP</th>
+                            <th>Failed Connections</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${telemetryHtml || '<tr><td colspan="5" style="text-align:center;color:#64748b;padding:24px">No telemetry data</td></tr>'}
+                    </tbody>
+                </table>
+            </div>
+        </div>`;
+
+        // Initialize Chart.js after DOM updates
+        setTimeout(() => {
+            if (device.history && device.history.length > 0) {
+                const ctx = document.getElementById('trustChart').getContext('2d');
+                const labels = device.history.map(h => h.timestamp.split(' ')[0].substring(5));
+                const data = device.history.map(h => h.trust_score);
+                const pointColors = data.map(score => getScoreColor(score));
+                
+                new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Trust Score',
+                            data: data,
+                            borderColor: '#3b9eff',
+                            backgroundColor: 'rgba(59, 158, 255, 0.1)',
+                            borderWidth: 2,
+                            pointBackgroundColor: pointColors,
+                            pointRadius: 4,
+                            fill: true,
+                            tension: 0.3
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: { min: 0, max: 100, ticks: { color: '#64748b' }, grid: { color: '#1e293b' } },
+                            x: { ticks: { color: '#64748b' }, grid: { display: false } }
+                        },
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { callbacks: { label: (c) => ' Score: ' + c.raw } }
+                        }
+                    }
+                });
+            }
+        }, 100);
+
+    }).catch((err) => {
+        console.error(err);
+        document.getElementById('content').innerHTML =
+            '<div class="loading">Error loading device. Make sure data has been uploaded.</div>';
+    });
+</script>
+</body>
+</html>
