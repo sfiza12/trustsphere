@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TrustSphere - Login</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; background: #0a0e1a; color: #e0e6f0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+        .auth-card { background: #111827; border: 1px solid #1e3a5f; border-radius: 12px; padding: 40px; width: 100%; max-width: 400px; text-align: center; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3); }
+        .logo { font-size: 28px; font-weight: 700; color: #3b9eff; letter-spacing: 1px; margin-bottom: 32px; }
+        .input-group { margin-bottom: 20px; text-align: left; }
+        .input-group label { display: block; font-size: 14px; color: #94a3b8; margin-bottom: 8px; }
+        .input-group input { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #1e3a5f; background: #0f172a; color: #fff; font-size: 16px; outline: none; }
+        .input-group input:focus { border-color: #3b9eff; }
+        .submit-btn { width: 100%; background: #3b9eff; color: white; border: none; padding: 14px; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 600; margin-top: 10px; transition: background 0.2s; }
+        .submit-btn:hover { background: #2563eb; }
+        .toggle-link { margin-top: 24px; font-size: 14px; color: #94a3b8; }
+        .toggle-link a { color: #3b9eff; text-decoration: none; }
+        .toggle-link a:hover { text-decoration: underline; }
+        .error-msg { color: #f87171; background: #4c0519; padding: 10px; border-radius: 6px; margin-bottom: 20px; font-size: 14px; display: none; }
+    </style>
+</head>
+<body>
+
+<div class="auth-card">
+    <div class="logo">🛡 TrustSphere</div>
+    
+    <div class="error-msg" id="error-box">
+        Invalid username or password.
+    </div>
+
+    <form method="POST" action="/login">
+        <!-- Allows Flask rendering of flash messages to override JS box -->
+        {% with messages = get_flashed_messages() %}
+        {% if messages %}
+            <div class="error-msg" style="display: block;">
+                {{ messages[0] }}
+            </div>
+        {% endif %}
+        {% endwith %}
+        
+        <div class="input-group">
+            <label for="username">Username</label>
+            <input type="text" id="username" name="username" required autocomplete="username">
+        </div>
+        
+        <div class="input-group">
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" required autocomplete="current-password">
+        </div>
+        
+        <button type="submit" class="submit-btn">Secure Login</button>
+    </form>
+    
+    <div class="toggle-link">
+        Don't have an account? <a href="/register">Register here</a>
+    </div>
+</div>
+
+</body>
+</html>

@@ -8,97 +8,138 @@
 
 import sqlite3
 import os
+import logging
+from config import DATABASE_URI  # type: ignore
 
-# DB_PATH: Computes the absolute file path where the SQLite database file 
-# will be physically stored or created. It points to the parent directory 
-# of this 'models' folder, naming the file 'trustsphere.db'.
-DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'trustsphere.db')
+try:
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+except ImportError:
+    psycopg2 = None
+
+class CursorWrapper:
+    """
+    Intelligent cursor wrapper that dynamically translates SQLite syntaxes 
+    (like ? placeholders and AUTOINCREMENT) into PostgreSQL-compatible syntax 
+    on the fly. This avoids having to rewrite hundreds of lines of legacy code in app.py.
+    """
+    def __init__(self, cursor, is_postgres):
+        self.cursor = cursor
+        self.is_postgres = is_postgres
+
+    def execute(self, query, params=None):
+        if self.is_postgres:
+            # Dynamically cast DB engines
+            query = query.replace('?', '%s')
+            query = query.replace('AUTOINCREMENT', 'SERIAL')
+            
+        if params:
+            self.cursor.execute(query, params)
+        else:
+            self.cursor.execute(query)
+            
+    def fetchone(self):
+        return self.cursor.fetchone()
+
+    def fetchall(self):
+        return self.cursor.fetchall()
+        
+    def close(self):
+        self.cursor.close()
+
+class ConnectionWrapper:
+    def __init__(self, conn, is_postgres):
+        self.conn = conn
+        self.is_postgres = is_postgres
+        
+    def cursor(self):
+        return CursorWrapper(self.conn.cursor(), self.is_postgres)
+        
+    def commit(self):
+        self.conn.commit()
+        
+    def close(self):
+        self.conn.close()
 
 def get_connection():
     """
-    Establishes and returns a new active connection to the SQLite database.
-    Configures the connection to use sqlite3.Row, allowing rows to be 
-    accessed natively as dictionary-like objects (e.g., row['device_id']) 
-    rather than purely integer-indexed tuples (e.g., row[0]).
+    Establishes and returns a new active connection to either Postgres or SQLite.
     """
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    if DATABASE_URI.startswith('postgres'):
+        if not psycopg2:
+            raise RuntimeError("psycopg2-binary is required for PostgreSQL. Please install it.")
+        # We use RealDictCursor to perfectly mimic sqlite3.Row functionality
+        conn = psycopg2.connect(DATABASE_URI, cursor_factory=RealDictCursor)
+        return ConnectionWrapper(conn, True)
+    else:
+        # Parse sqlite path gracefully 
+        path = DATABASE_URI.replace('sqlite:///', '')
+        if not path or path == 'trustsphere.db':
+            path = os.path.join(os.path.dirname(__file__), '..', 'trustsphere.db')
+        conn = sqlite3.connect(path)
+        conn.row_factory = sqlite3.Row
+        return ConnectionWrapper(conn, False)
 
 def init_db():
-    """
-    Initializes the deterministic schema of the database on application startup.
-    Uses 'CREATE TABLE IF NOT EXISTS' to ensure absolute safety and idempotency, 
-    meaning this function can be run multiple times safely without wiping existing data.
-    """
     conn = get_connection()
     cursor = conn.cursor()
 
-    # -------------------------------------------------------------------------
-    # TABLE 1: devices
-    # -------------------------------------------------------------------------
-    # Acts as the master registry mapping each known IoT device ID to its current 
-    # persistent state, computed baseline metrics, and current trust profile.
+    # 1: Devices Table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS devices (
             device_id TEXT PRIMARY KEY,
-            trust_score REAL DEFAULT 100,           -- The current active trust score
-            previous_score REAL DEFAULT NULL,       -- The score immediately prior to the latest computation phase 
-            baseline_packets REAL DEFAULT NULL,     -- The learned normal packet volume per minute
-            baseline_failed REAL DEFAULT NULL,      -- The learned normal failed connection volume
-            baseline_unique_ips REAL DEFAULT NULL,  -- The learned normal count of unique destination IPs spoken to
-            drift_streak INTEGER DEFAULT 0,         -- Counter tracking consecutive chronological units of detected drift
-            confirmation_days INTEGER DEFAULT 0,    -- Counter tracking observation cycles for baseline auto-adjustment
-            last_updated TEXT,                      -- ISO timestamp of the last state mutation
-            mode TEXT DEFAULT 'NORMAL'              -- The current behavioral categorization state machine phase
+            trust_score REAL DEFAULT 100,
+            previous_score REAL DEFAULT NULL,
+            baseline_packets REAL DEFAULT NULL,
+            baseline_failed REAL DEFAULT NULL,
+            baseline_unique_ips REAL DEFAULT NULL,
+            drift_streak INTEGER DEFAULT 0,
+            confirmation_days INTEGER DEFAULT 0,
+            last_updated TEXT,
+            mode TEXT DEFAULT 'NORMAL'
         )
     ''')
 
-    # -------------------------------------------------------------------------
-    # TABLE 2: telemetry
-    # -------------------------------------------------------------------------
-    # An append-only ledger storing every single raw packet/row of information 
-    # uploaded via CSV. Useful for data retention, human auditing, and re-processing.
+    # 2: Telemetry Table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS telemetry (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             device_id TEXT,
-            timestamp TEXT,                         -- The explicit chronological time of the event
-            packets_per_min REAL,                   -- Volume metric
-            port_used INTEGER,                      -- Networking configuration metric
-            destination_ip TEXT,                    -- Target address metric
-            failed_connections INTEGER              -- Error/brute-force signaling metric
+            timestamp TEXT,
+            packets_per_min REAL,
+            port_used INTEGER,
+            destination_ip TEXT,
+            failed_connections INTEGER
         )
     ''')
 
-    # -------------------------------------------------------------------------
-    # TABLE 3: trust_history
-    # -------------------------------------------------------------------------
-    # A temporal tracking ledger that logs point-in-time trust score variations 
-    # and the massive JSON explanation payload dictating exactly WHY the score changed.
-    # Entirely powers the dashboard timeline graph and explainability deep links.
+    # 3: Trust History Table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS trust_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            device_id TEXT,                         -- The specific device being scored
-            timestamp TEXT,                         -- The exact moment the evaluation happened
-            trust_score REAL,                       -- The generated score output
-            severity TEXT,                          -- Human-readable categorization string (e.g., CRITICAL, GOOD)
-            explanation TEXT                        -- Highly detailed JSON payload containing generation logic
+            device_id TEXT,
+            timestamp TEXT,
+            trust_score REAL,
+            severity TEXT,
+            explanation TEXT
+        )
+    ''')
+    
+    # 4. Users table (Phase 2 Authenticiation addition)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL
         )
     ''')
 
-    # -------------------------------------------------------------------------
-    # MIGRATION SAFETY BLOCK
-    # -------------------------------------------------------------------------
-    # Gracefully attempts to append the 'mode' column if an older version of the 
-    # SQLite schema is actively running on the local machine during startup.
-    # Exception handling catches and swallows the OperationalError if it already exists.
-    try:
-        cursor.execute("ALTER TABLE devices ADD COLUMN mode TEXT DEFAULT 'NORMAL'")
-    except sqlite3.OperationalError:
-        pass # Column already structurally exists; bypass safely
+    # MIGRATION SAFETY BLOCK for SQLite local users dynamically running old code
+    if not conn.is_postgres:
+        try:
+            cursor.execute("ALTER TABLE devices ADD COLUMN mode TEXT DEFAULT 'NORMAL'")
+        except sqlite3.OperationalError:
+            pass 
 
-    # Finalize writes and sever connection mathematically to free locks
     conn.commit()
     conn.close()

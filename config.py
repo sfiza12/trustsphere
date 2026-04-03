@@ -58,4 +58,7 @@ DIMENSION_CAP = config.get('dimension_cap', 30)
 RECOVERY_PER_CLEAN_HOUR = config.get('recovery_per_clean_hour', 5)
 
 # System
-DATABASE_PATH = config.get('database_path', 'trustsphere.db')
+DATABASE_URI = config.get('database_uri', 'sqlite:///trustsphere.db')
+MQTT_BROKER = config.get('mqtt_broker', 'broker.hivemq.com')
+MQTT_PORT = config.get('mqtt_port', 1883)
+MQTT_TOPIC = config.get('mqtt_topic', 'trustsphere/telemetry')

@@ -6,10 +6,11 @@
 # engines (Violation, Drift, ML, Trust Score, Explainability, Baseline Manager).
 # =============================================================================
 
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, redirect, url_for, flash
 import pandas as pd
 import json
 from datetime import datetime
+from flask_login import LoginManager, login_user, logout_user, login_required, current_user  # type: ignore
 
 # Import internal models and engines
 from models.database import init_db, get_connection
@@ -22,19 +23,83 @@ from models.baseline_manager import should_update_baseline, calculate_new_baseli
 import logging
 
 from config import SUSTAINED_HOURS, CONFIRMATION_HOURS_REQUIRED  # type: ignore
+from models.auth import User
+from models.mqtt_listener import start_mqtt_listener  # type: ignore
+import secrets
 
 # Initialize the Flask application
 app = Flask(__name__)
+# Use a strong secret key for sessions
+app.secret_key = secrets.token_hex(32)
+
+# Set up Login Manager
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+
+@login_manager.user_loader
+def load_user(user_id):
+    return User.get(user_id)
 
 # Ensure the database schemas and tables are initialized when the app starts
 with app.app_context():
     init_db()
 
 # -----------------------------------------------------------------------------
+# AUTHENTICATION ROUTES
+# -----------------------------------------------------------------------------
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if current_user.is_authenticated:
+        return redirect(url_for('index'))
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        user = User.get_by_username(username)
+        if user and user.check_password(password):
+            login_user(user)
+            return redirect(url_for('index'))
+        else:
+            flash('Invalid username or password.')
+    return render_template('login.html')
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if current_user.is_authenticated:
+        return redirect(url_for('index'))
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        if not username or not password:
+            flash('Please provide both username and password.')
+            return redirect(url_for('register'))
+            
+        if User.get_by_username(username):
+            flash('Username already exists. Choose another.')
+            return redirect(url_for('register'))
+            
+        success = User.create(username, password)
+        if success:
+            user = User.get_by_username(username)
+            login_user(user)
+            return redirect(url_for('index'))
+        else:
+            flash('An error occurred during registration.')
+    return render_template('register.html')
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for('login'))
+
+# -----------------------------------------------------------------------------
 # FRONTEND ROUTES
 # -----------------------------------------------------------------------------
 
 @app.route('/')
+@login_required
 def index():
     """
     Serves the main dashboard application page (index.html).
@@ -42,6 +107,7 @@ def index():
     return render_template('index.html')
 
 @app.route('/upload-page')
+@login_required
 def upload_page():
     """
     Serves the page for users to upload static CSV telemetry data.
@@ -49,6 +115,7 @@ def upload_page():
     return render_template('upload.html')
 
 @app.route('/device-page/<device_id>')
+@login_required
 def device_page(device_id):
     """
     Serves the dedicated detail view page for a specific device.
@@ -552,5 +619,9 @@ def reset_database():
 # RUN ENTRYPOINT
 # -----------------------------------------------------------------------------
 if __name__ == '__main__':
+    # Start the live background MQTT listener to actively poll for stream telemetry
+    start_mqtt_listener(process_telemetry)
+    
     # Binds internally to Flask development server on standard dev port
-    app.run(debug=True, port=5000)
+    # Disabled reloader to prevent duplicate MQTT background thread spawning
+    app.run(debug=True, port=5000, use_reloader=False)
