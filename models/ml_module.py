@@ -16,13 +16,10 @@
 import sys
 import os
 import logging
-import numpy as np
-from sklearn.ensemble import IsolationForest
-from sklearn.preprocessing import StandardScaler
-
-# Import centralized configuration
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from config import (
+import numpy as np  # type: ignore
+from sklearn.ensemble import IsolationForest  # type: ignore
+from sklearn.preprocessing import StandardScaler  # type: ignore
+from config import (  # type: ignore
     ML_THRESHOLD, 
     ML_MODERATE_THRESHOLD, 
     MIN_DEVIATING_PARAMS, 
@@ -114,7 +111,8 @@ class DeviceMLModel:
             self.feature_stds = np.std(X, axis=0)
             
             # Prevent divide by zero error if a feature never changed during training
-            self.feature_stds = np.where(self.feature_stds < 0.01, 1.0, self.feature_stds)
+            if self.feature_stds is not None:
+                self.feature_stds = np.where(self.feature_stds < 0.01, 1.0, self.feature_stds)  # type: ignore
             
         except Exception as e:
             logging.error(f"Model fit failed for {self.device_id}: {e}")
@@ -169,10 +167,10 @@ class DeviceMLModel:
             train_scores = self.model.decision_function(X_train_scaled)
             
             # Normalize to 0.0 -> 1.0 scale mapping
-            rng = max(float(train_scores.max()) - float(train_scores.min()), 0.05)
-            normalized_score = max(0.0, min(1.0, (float(train_scores.max()) - raw) / rng))
+            rng = max(float(np.max(train_scores)) - float(np.min(train_scores)), 0.05)
+            normalized_score = max(0.0, min(1.0, (float(np.max(train_scores)) - raw) / rng))
             
-            return round(normalized_score, 3)
+            return round(float(normalized_score), 3)  # type: ignore
             
         except Exception as e:
             logging.error(f"Prediction parsing error for {self.device_id}: {e}")
@@ -196,10 +194,10 @@ def train_model(training_data, device_id='unknown'):
                 # Row format is presumed as [packets, failed, unique_ips, port]
                 # Re-mapped internally to [packets, failed, port, ips] for logical array
                 model.training_history.append([
-                    float(row[0]), 
-                    float(row[1]),
-                    float(row[3]), 
-                    float(row[2])
+                    float(row[0]),  # type: ignore
+                    float(row[1]),  # type: ignore
+                    float(row[3]),  # type: ignore
+                    float(row[2])   # type: ignore
                 ])
                 
         # Adapt model dynamically

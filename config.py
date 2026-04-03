@@ -1,5 +1,5 @@
 import os
-import yaml
+import yaml  # type: ignore
 import logging
 
 def load_config():
@@ -16,7 +16,7 @@ def load_config():
         logging.error(f"Configuration file not found at {config_path}")
         # Fallback to defaults to prevent immediate application crash
         return {}
-    except yaml.YAMLError as exc:
+    except yaml.YAMLError as exc:  # type: ignore
         logging.error(f"Error parsing config.yaml: {exc}")
         return {}
 

@@ -10,11 +10,7 @@
 # by enforcing strict time-delay observation windows and hard violation blocking. 
 # =============================================================================
 
-import sys
-import os
 import logging
-
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from config import DRIFT_HOURS_BEFORE_CONFIRMATION, CONFIRMATION_HOURS_REQUIRED, BASELINE_SHIFT_RATE
 
 def should_update_baseline(device_row, current_packets, current_failed, 
@@ -113,7 +109,7 @@ def calculate_new_baseline(old_baseline, current_value):
         # Append calculated shift delta to previous static baseline
         new_baseline = float(old_baseline) + shift
         
-        return round(new_baseline, 2)
+        return round(float(new_baseline), 2)  # type: ignore
     except Exception as e:
         logging.error(f"Error calculating new baseline: {e}")
         return float(old_baseline) if old_baseline else 0.0
@@ -126,9 +122,9 @@ def initialize_baseline(packets, failed, unique_ips):
     """
     try:
         return {
-            'baseline_packets': round(float(packets), 2),
-            'baseline_failed': round(float(failed), 2),
-            'baseline_unique_ips': round(float(unique_ips), 2) 
+            'baseline_packets': round(float(packets), 2),  # type: ignore
+            'baseline_failed': round(float(failed), 2),    # type: ignore
+            'baseline_unique_ips': round(float(unique_ips), 2)  # type: ignore
         }
     except Exception as e:
         logging.error(f"Error initializing baseline: {e}")

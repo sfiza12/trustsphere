@@ -9,12 +9,9 @@
 # trust score math is applied or modified.
 # =============================================================================
 
-import sys
-import os
 import logging
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from config import DIMENSION_CAP, RECOVERY_PER_CLEAN_HOUR
+from config import DIMENSION_CAP, RECOVERY_PER_CLEAN_HOUR  # type: ignore
 
 def get_severity(score):
     """
@@ -71,13 +68,13 @@ def calculate_trust_score(current_score, hard_penalty, drift_penalty, ml_penalty
         # 2. Mathematical application.
         # The max(0, ...) boundary enforcement ensures the score cannot logically 
         # drop below Absolute Zero into negative integer bounds, which would break UI.
-        new_score = max(0, float(current_score) - total_penalty)
+        new_score = max(0.0, float(current_score) - float(total_penalty))  # type: ignore
         
         # 3. Request classification tier natively
         severity = get_severity(new_score)
         
         # Rounding normalizes floating point artifacts before database storage
-        return round(new_score, 2), severity
+        return round(float(new_score), 2), severity  # type: ignore
     except Exception as e:
         logging.error(f"Error calculating trust score: {e}")
         return current_score, get_severity(current_score)
@@ -96,8 +93,8 @@ def apply_recovery(current_score):
     try:
         # The min(100, ...) boundary enforcement ensures the device cannot logically 
         # accumulate "infinite trust" above a perfect 100 percent maximum.
-        recovered = min(100, float(current_score) + RECOVERY_PER_CLEAN_HOUR)
-        return round(recovered, 2)
+        recovered = min(100.0, float(current_score) + float(RECOVERY_PER_CLEAN_HOUR))  # type: ignore
+        return round(float(recovered), 2)  # type: ignore
     except Exception as e:
         logging.error(f"Error applying recovery calculation: {e}")
         return float(current_score)

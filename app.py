@@ -21,7 +21,7 @@ from models.explainability import generate_explanation
 from models.baseline_manager import should_update_baseline, calculate_new_baseline, initialize_baseline
 import logging
 
-from config import SUSTAINED_HOURS, CONFIRMATION_HOURS_REQUIRED
+from config import SUSTAINED_HOURS, CONFIRMATION_HOURS_REQUIRED  # type: ignore
 
 # Initialize the Flask application
 app = Flask(__name__)
