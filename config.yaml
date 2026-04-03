@@ -1,0 +1,38 @@
+# =============================================================================
+# TRUSTSPHERE GLOBAL CONFIGURATION
+# =============================================================================
+
+# --- ML ENGINE CONFIGURATION ---
+ml_threshold: 0.75
+ml_moderate_threshold: 0.60
+min_deviating_params: 2
+param_z_threshold: 5.0
+device_baselines:
+  SENSOR_01: [20, 1, 443, 1]
+  THERMOSTAT_02: [50, 2, 443, 1]
+  CAM_03: [100, 2, 443, 1]
+  BULB_04: [5, 0, 443, 1]
+  ROUTER_05: [150, 4, 443, 3]
+
+# --- HARD VIOLATION CONFIGURATION ---
+approved_ports: [80, 443, 8080, 22, 21]
+approved_ip_prefixes: ['192.168.', '10.0.', '172.16.', '13.107.', '8.8.']
+max_failed_connections: 50
+hard_traffic_cap: 500
+
+# --- DRIFT DETECTION CONFIGURATION ---
+spike_threshold: 0.50
+drift_threshold: 0.30
+sustained_hours: 6
+
+# --- BASELINE MANAGER CONFIGURATION ---
+drift_hours_before_confirmation: 6
+confirmation_hours_required: 6
+baseline_shift_rate: 0.10
+
+# --- TRUST SCORE CONFIGURATION ---
+dimension_cap: 30
+recovery_per_clean_hour: 5
+
+# --- SYSTEM SETTINGS ---
+database_path: "trustsphere.db"

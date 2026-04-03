@@ -14,11 +14,14 @@ from datetime import datetime
 # Import internal models and engines
 from models.database import init_db, get_connection
 from models.violation_engine import check_violations, get_policy_limits
-from models.drift_engine import check_drift, SUSTAINED_HOURS
+from models.drift_engine import check_drift
 from models.ml_module import check_ml_anomaly, train_model
 from models.trust_score import calculate_trust_score, apply_recovery, get_severity
 from models.explainability import generate_explanation
-from models.baseline_manager import should_update_baseline, calculate_new_baseline, initialize_baseline, CONFIRMATION_HOURS_REQUIRED
+from models.baseline_manager import should_update_baseline, calculate_new_baseline, initialize_baseline
+import logging
+
+from config import SUSTAINED_HOURS, CONFIRMATION_HOURS_REQUIRED
 
 # Initialize the Flask application
 app = Flask(__name__)
@@ -305,258 +308,220 @@ def process_telemetry(df):
 
     # PHASE 2: Core Loop iterating over each distinct device individually
     for device_id in device_ids:
-        # Pre-sort device traffic chronologically to ensure logical progression
-        # (day 1 traffic processed before day 2)
-        device_df = df[df['device_id'] == device_id].sort_values('timestamp')
+        try:
+            # Pre-sort device traffic chronologically to ensure logical progression
+            # (day 1 traffic processed before day 2)
+            device_df = df[df['device_id'] == device_id].sort_values('timestamp')
 
-        # Retrieve current internal state for this device from DB
-        cursor.execute('SELECT * FROM devices WHERE device_id = ?', (device_id,))
-        device_row = cursor.fetchone()
-
-        # If device is completely unknown (new device connection event), 
-        # initialize it at max trust (100) and register it in systems.
-        if not device_row:
-            cursor.execute('''
-                INSERT INTO devices (device_id, trust_score, last_updated)
-                VALUES (?, 100, ?)
-            ''', (device_id, datetime.now().isoformat()))
-            conn.commit()
-            # Re-fetch populated row
+            # Retrieve current internal state for this device from DB
             cursor.execute('SELECT * FROM devices WHERE device_id = ?', (device_id,))
             device_row = cursor.fetchone()
 
-        # Cast SQLite Row object to generic writable dictionary 
-        device_dict = dict(device_row)
+            # If device is completely unknown (new device connection event), 
+            # initialize it at max trust (100) and register it in systems.
+            if not device_row:
+                cursor.execute('''
+                    INSERT INTO devices (device_id, trust_score, last_updated)
+                    VALUES (?, 100, ?)
+                ''', (device_id, datetime.now().isoformat()))
+                conn.commit()
+                # Re-fetch populated row
+                cursor.execute('SELECT * FROM devices WHERE device_id = ?', (device_id,))
+                device_row = cursor.fetchone()
 
-        # Retain score at the START of this batch chronologically.
-        # This acts as our "before" snapshot to compare "after" batch computation.
-        score_at_batch_start = device_dict['trust_score']
-        current_score = device_dict['trust_score']
+            # Cast SQLite Row object to generic writable dictionary 
+            device_dict = dict(device_row)
 
-        # Determine total globally unique IPs spoken to during this batch 
-        # (heuristic often linked with worm/DDoS behavior or C2 mapping).
-        unique_ips = len(device_df['destination_ip'].unique())
+            # Retain score at the START of this batch chronologically.
+            # This acts as our "before" snapshot to compare "after" batch computation.
+            score_at_batch_start = device_dict['trust_score']
+            current_score = device_dict['trust_score']
 
-        # ---------------------------------------------------------------------
-        # ML Engine Preparation Step
-        # ---------------------------------------------------------------------
-        # Pre-accumulate training feature rows for the ML model over this entire 
-        # specific chunk of data. This allows the model to periodically adapt.
-        training_features = []
-        for _, row in device_df.iterrows():
-            training_features.append([
-                row['packets_per_min'],
-                row['failed_connections'],
-                unique_ips,
-                row['port_used']
-            ])
-            
-        # Only invoke training overhead if we have a substantial enough data window (>10)
-        # to prevent model overfitting on microscopic spikes.
-        if len(training_features) >= 10:
-            train_model(training_features)
+            # Determine total globally unique IPs spoken to during this batch 
+            # (heuristic often linked with worm/DDoS behavior or C2 mapping).
+            unique_ips = len(device_df['destination_ip'].unique())
 
-
-        # ---------------------------------------------------------------------
-        # Variable Initialization Phase for continuous row loop
-        # ---------------------------------------------------------------------
-        hard_penalty = 0
-        drift_penalty = 0
-        ml_penalty = 0
-        ml_score = 0
-        
-        # Load accumulated persistence counters
-        new_streak = device_dict.get('drift_streak') or 0
-        new_confirmation = device_dict.get('confirmation_days') or 0
-        
-        new_score = current_score
-        explanation = {}
-        drift_type = "none"
-        hard_reasons = []
-        drift_reasons = []
-        mode = "NORMAL"
-        new_baseline_packets = device_dict['baseline_packets']
-
-        # ── MAIN ROW LOOP ────────────────────────────────────────
-        # Sequentially evaluate the device's action chronological step by step.
-        for _, row in device_df.iterrows():
-            row_dict = row.to_dict()
-
-            # Self-healing logic for missing baselines. Only on first row iteration.
-            # If the device has no prior computed baseline, force initialize its
-            # baseline values using this specific data row's attributes immediately.
-            if device_dict['baseline_packets'] is None:
-                baseline = initialize_baseline(
-                    row_dict['packets_per_min'],
-                    row_dict['failed_connections'],
-                    unique_ips
-                )
-                device_dict['baseline_packets'] = baseline['baseline_packets']
-                device_dict['baseline_failed'] = baseline['baseline_failed']
-                device_dict['baseline_unique_ips'] = baseline['baseline_unique_ips']
-                new_baseline_packets = device_dict['baseline_packets']
-
-            # -----------------------------------------------------------------
-            # STEP 1: ENGINE 1: Hard Violation (Static Policies)
-            # Determines if explicitly dangerous policies are broken (e.g. port 22 SSH)
-            # -----------------------------------------------------------------
-            hard_penalty, hard_reasons = check_violations(row_dict)
-            has_hard_violation = hard_penalty > 0 # Boolean flag blocking subsequent modes
-
-            # -----------------------------------------------------------------
-            # STEP 2: ENGINE 2: Drift Detection (Statistical deviation from baseline)
-            # -----------------------------------------------------------------
-            # Checks if packets or behavior is consistently drifting slightly higher
-            drift_penalty, drift_type, drift_reasons, new_streak = check_drift(
-                device_dict,
-                row_dict['packets_per_min'],
-                row_dict['failed_connections'],
-                unique_ips
-            )
-
-            # ── KEY ARCHITECTURAL FIX: OBSERVATION MODE ──────────────────────
-            # By definition, if a device has exhibited sustained drift continuously
-            # without triggering ANY hard/critical rule violations, it is statistically 
-            # more likely a benign environment/pattern shift (like a firmware update)
-            # rather than malicious activity.
-            # Here we enforce a conditional suppression to hold penalties at 0.
-            # This "Observation period" gives the System time to naturally recalibrate.
-            if new_streak >= SUSTAINED_HOURS and not has_hard_violation:
-                drift_penalty = 0 # Suppress mathematically.
-
-            # -----------------------------------------------------------------
-            # STEP 3: ENGINE 3: ML Anomaly Detection (Isolation Forest)
-            # -----------------------------------------------------------------
-            # Multi-parameter ML detection mechanism. Detects compound, complex
-            # structural deviation combinations that regular logic misses.
-            ml_penalty, ml_score, ml_reasons = check_ml_anomaly(
-                row_dict['packets_per_min'],
-                row_dict['failed_connections'],
-                unique_ips,
-                row_dict['port_used'],
-                device_id
-            )
-
-            # -----------------------------------------------------------------
-            # STEP 4: ENGINE 4: Aggregate Trust Score Engine
-            # -----------------------------------------------------------------
-            # Aggregate all calculated sub-penalties into a master deduction
-            total_penalty = hard_penalty + drift_penalty + ml_penalty
-            
-            # Apply passive gradual "healing/recovery" points if behavior is 
-            # consistently perfectly clean logic (no penalties triggered whatsoever)
-            if total_penalty == 0:
-                new_score = apply_recovery(current_score)
-            else:
-                # Deduct compound points cleanly to prevent dropping below absolute 0
-                new_score, _ = calculate_trust_score(
-                    current_score, hard_penalty, drift_penalty, ml_penalty
-                )
+            # ---------------------------------------------------------------------
+            # ML Engine Preparation Step
+            # ---------------------------------------------------------------------
+            # Pre-accumulate training feature rows for the ML model over this entire 
+            # specific chunk of data. This allows the model to periodically adapt.
+            training_features = []
+            for _, row in device_df.iterrows():
+                training_features.append([
+                    row['packets_per_min'],
+                    row['failed_connections'],
+                    unique_ips,
+                    row['port_used']
+                ])
                 
-            # Compute a categorical tag out of the numeric score (e.g. CRITICAL/GOOD)
-            severity = get_severity(new_score)
+            # Only invoke training overhead if we have a substantial enough data window (>10)
+            # to prevent model overfitting on microscopic spikes.
+            if len(training_features) >= 10:
+                train_model(training_features)
 
-            # ── BASELINE ADAPTATION PER ROW ─────────────────────
-            # Adaptive core: runs constantly deep inside loop. 
-            # Periodically gradually shifts baseline day by day during confirmation limit.
-            # Security constraint implemented: Updates are completely blocked off if a 
-            # hard violation is active (anti-model-poisoning defense mechanism).
-            update_baseline, new_confirmation = should_update_baseline(
-                device_dict,
-                row_dict['packets_per_min'],
-                row_dict['failed_connections'],
-                unique_ips,
-                has_hard_violation
-            )
-            if update_baseline and device_dict['baseline_packets']:
-                # Commits shifting to the actual value tracking
-                new_baseline_packets = calculate_new_baseline(
-                    device_dict['baseline_packets'],
-                    row_dict['packets_per_min']
-                )
-                # Ensure the subsequent row loop sees the newly computed baseline dynamically
-                device_dict['baseline_packets'] = new_baseline_packets
 
-            # ── MODE CALCULATION STATE MACHINE ────────────────────────────────
-            # Explicitly tags device phases for human dashboard reasoning tracking
-            if has_hard_violation:
-                mode = "HARD VIOLATION"
-            elif new_streak == 0:
-                mode = "NORMAL"
-            elif new_streak < SUSTAINED_HOURS:
-                mode = "DRIFT DETECTED"
-            elif new_confirmation >= 3:
-                mode = "BASELINE UPDATED"
-            else:
-                mode = "BASELINE CONFIRMATION"
+            # ---------------------------------------------------------------------
+            # Variable Initialization Phase for continuous row loop
+            # ---------------------------------------------------------------------
+            hard_penalty = 0
+            drift_penalty = 0
+            ml_penalty = 0
+            ml_score = 0
+            
+            # Load accumulated persistence counters
+            new_streak = device_dict.get('drift_streak') or 0
+            new_confirmation = device_dict.get('confirmation_days') or 0
+            
+            new_score = current_score
+            explanation = {}
+            drift_type = "none"
+            hard_reasons = []
+            drift_reasons = []
+            mode = "NORMAL"
+            new_baseline_packets = device_dict['baseline_packets']
 
-            # -----------------------------------------------------------------
-            # STEP 5: Generator Engine: Explainability Log compilation
-            # -----------------------------------------------------------------
-            # Aggregates mathematical states, states, and penalties together 
-            # dynamically into an object detailing WHY this specific score change 
-            # occurred at this exact ms timeframe.
-            explanation = generate_explanation(
-                device_id=device_id,
-                trust_score=new_score,
-                severity=severity,
-                hard_penalty=hard_penalty,
-                drift_penalty=drift_penalty,
-                ml_penalty=ml_penalty,
-                ml_score=ml_score,
-                hard_reasons=hard_reasons,
-                drift_reasons=drift_reasons,
-                drift_type=drift_type,
-                current_packets=row_dict['packets_per_min'],
-                baseline_packets=device_dict['baseline_packets'],
-                destination_ip=row_dict['destination_ip'],
-                port_used=row_dict['port_used'],
-                score_before=current_score
-            )
+            # ── MAIN ROW LOOP ────────────────────────────────────────
+            # Sequentially evaluate the device's action chronological step by step.
+            for _, row in device_df.iterrows():
+                try:
+                    row_dict = row.to_dict()
 
-            # Insert this specific row's micro point-in-time state directly into DB,
-            # alongside its generated explanation object payload blob.
-            # Crucial for timeline graphs that let users rewind states visually.
+                    # Self-healing logic for missing baselines. Only on first row iteration.
+                    if device_dict['baseline_packets'] is None:
+                        baseline = initialize_baseline(
+                            row_dict['packets_per_min'],
+                            row_dict['failed_connections'],
+                            unique_ips
+                        )
+                        device_dict['baseline_packets'] = baseline['baseline_packets']
+                        device_dict['baseline_failed'] = baseline['baseline_failed']
+                        device_dict['baseline_unique_ips'] = baseline['baseline_unique_ips']
+                        new_baseline_packets = device_dict['baseline_packets']
+
+                    # STEP 1: ENGINE 1: Hard Violation (Static Policies)
+                    hard_penalty, hard_reasons = check_violations(row_dict)
+                    has_hard_violation = hard_penalty > 0 
+
+                    # STEP 2: ENGINE 2: Drift Detection
+                    drift_penalty, drift_type, drift_reasons, new_streak = check_drift(
+                        device_dict,
+                        row_dict['packets_per_min'],
+                        row_dict['failed_connections'],
+                        unique_ips
+                    )
+
+                    # OBSERVATION MODE FIX
+                    if new_streak >= SUSTAINED_HOURS and not has_hard_violation:
+                        drift_penalty = 0
+
+                    # STEP 3: ENGINE 3: ML Anomaly Detection (Isolation Forest)
+                    ml_penalty, ml_score, ml_reasons = check_ml_anomaly(
+                        row_dict['packets_per_min'],
+                        row_dict['failed_connections'],
+                        unique_ips,
+                        row_dict['port_used'],
+                        device_id
+                    )
+
+                    # STEP 4: ENGINE 4: Aggregate Trust Score Engine
+                    total_penalty = hard_penalty + drift_penalty + ml_penalty
+                    
+                    if total_penalty == 0:
+                        new_score = apply_recovery(current_score)
+                    else:
+                        new_score, _ = calculate_trust_score(
+                            current_score, hard_penalty, drift_penalty, ml_penalty
+                        )
+                        
+                    severity = get_severity(new_score)
+
+                    # BASELINE ADAPTATION
+                    update_baseline, new_confirmation = should_update_baseline(
+                        device_dict,
+                        row_dict['packets_per_min'],
+                        row_dict['failed_connections'],
+                        unique_ips,
+                        has_hard_violation
+                    )
+                    if update_baseline and device_dict['baseline_packets']:
+                        new_baseline_packets = calculate_new_baseline(
+                            device_dict['baseline_packets'],
+                            row_dict['packets_per_min']
+                        )
+                        device_dict['baseline_packets'] = new_baseline_packets
+
+                    # MODE CALCULATION
+                    if has_hard_violation:
+                        mode = "HARD VIOLATION"
+                    elif new_streak == 0:
+                        mode = "NORMAL"
+                    elif new_streak < SUSTAINED_HOURS:
+                        mode = "DRIFT DETECTED"
+                    elif new_confirmation >= 3:
+                        mode = "BASELINE UPDATED"
+                    else:
+                        mode = "BASELINE CONFIRMATION"
+
+                    # STEP 5: Explanations
+                    explanation = generate_explanation(
+                        device_id=device_id,
+                        trust_score=new_score,
+                        severity=severity,
+                        hard_penalty=hard_penalty,
+                        drift_penalty=drift_penalty,
+                        ml_penalty=ml_penalty,
+                        ml_score=ml_score,
+                        hard_reasons=hard_reasons,
+                        drift_reasons=drift_reasons,
+                        drift_type=drift_type,
+                        current_packets=row_dict['packets_per_min'],
+                        baseline_packets=device_dict['baseline_packets'],
+                        destination_ip=row_dict['destination_ip'],
+                        port_used=row_dict['port_used'],
+                        score_before=current_score
+                    )
+
+                    cursor.execute('''
+                        INSERT INTO trust_history (device_id, timestamp, trust_score, severity, explanation)
+                        VALUES (?, ?, ?, ?, ?)
+                    ''', (device_id, row_dict['timestamp'], new_score, severity, json.dumps(explanation)))
+
+                    device_dict['drift_streak'] = new_streak
+                    device_dict['confirmation_days'] = new_confirmation
+                    current_score = new_score
+                    
+                except Exception as e:
+                    logging.error(f"Error processing individual row for {device_id}: {e}")
+                    # Skip problematic row and continue
+                    continue
+
+            # END OF ROW BATCH LOOP
             cursor.execute('''
-                INSERT INTO trust_history (device_id, timestamp, trust_score, severity, explanation)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (device_id, row_dict['timestamp'], new_score, severity, json.dumps(explanation)))
-
-            # -----------------------------------------------------------------
-            # CARRY FORWARD BLOCK
-            # Push continuous state mutations back logically into dictionary so the 
-            # VERY next raw row in the loop assesses context from this previous run.
-            # -----------------------------------------------------------------
-            device_dict['drift_streak'] = new_streak
-            device_dict['confirmation_days'] = new_confirmation
-            current_score = new_score
-
-        # ---------------------------------------------------------------------
-        # END OF ROW BATCH LOOP
-        # All rows logic resolved. Finalize the ultimate calculated state snapshot  
-        # back out to root device's primary persistent master record
-        # ---------------------------------------------------------------------
-        # previous_score holds the score mathematically recorded exactly at batch START 
-        cursor.execute('''
-            UPDATE devices SET
-                trust_score = ?,
-                previous_score = ?,
-                baseline_packets = ?,
-                drift_streak = ?,
-                confirmation_days = ?,
-                last_updated = ?,
-                mode = ?
-            WHERE device_id = ?
-        ''', (
-            new_score,
-            score_at_batch_start,
-            new_baseline_packets, # Overwrites old baseline with smoothed drifted baseline
-            new_streak,
-            new_confirmation,
-            datetime.now().isoformat(),
-            mode,
-            device_id
-        ))
+                UPDATE devices SET
+                    trust_score = ?,
+                    previous_score = ?,
+                    baseline_packets = ?,
+                    drift_streak = ?,
+                    confirmation_days = ?,
+                    last_updated = ?,
+                    mode = ?
+                WHERE device_id = ?
+            ''', (
+                new_score,
+                score_at_batch_start,
+                new_baseline_packets, 
+                new_streak,
+                new_confirmation,
+                datetime.now().isoformat(),
+                mode,
+                device_id
+            ))
+            
+        except Exception as e:
+            logging.error(f"Error processing entire device batch for {device_id}: {e}")
+            # Skip this entire device but allow other devices in the array to process
+            continue
 
     # Commit all massive row + chunk database transaction shifts atomically.
     conn.commit()

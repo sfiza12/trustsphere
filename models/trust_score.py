@@ -9,20 +9,12 @@
 # trust score math is applied or modified.
 # =============================================================================
 
-# -----------------------------------------------------------------------------
-# SCORING PARAMETERS & LIMITS
-# -----------------------------------------------------------------------------
-# DIMENSION_CAP: The absolute maximum penalty points that any single detection 
-# engine can deduct in a single evaluation cycle. This is a critical security 
-# mechanism preventing any one faulty engine (e.g. an over-sensitive ML model) 
-# from single-handedly dominating the score and crashing a device to 0 instantly.
-DIMENSION_CAP = 30
+import sys
+import os
+import logging
 
-# RECOVERY_PER_CLEAN_HOUR: The amount of trust score points a device regains 
-# naturally if it completes a full evaluation cycle with exactly 0 penalties 
-# across all engines. This organic "healing" mechanism penalizes short-term spikes
-# while rewarding long-term consistent good behavior.
-RECOVERY_PER_CLEAN_HOUR = 5
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from config import DIMENSION_CAP, RECOVERY_PER_CLEAN_HOUR
 
 def get_severity(score):
     """
@@ -69,21 +61,26 @@ def calculate_trust_score(current_score, hard_penalty, drift_penalty, ml_penalty
                Rounded numeric score bounded at 0, and its corresponding categorical tag.
     """
     
-    # 1. Total geometric penalty is the absolute sum of all three distinct dimensions.
-    # Note: Engines intrinsically cap their own outputs at DIMENSION_CAP internally 
-    # prior to passing values to this function.
-    total_penalty = hard_penalty + drift_penalty + ml_penalty
-    
-    # 2. Mathematical application.
-    # The max(0, ...) boundary enforcement ensures the score cannot logically 
-    # drop below Absolute Zero into negative integer bounds, which would break UI.
-    new_score = max(0, current_score - total_penalty)
-    
-    # 3. Request classification tier natively
-    severity = get_severity(new_score)
-    
-    # Rounding normalizes floating point artifacts before database storage
-    return round(new_score, 2), severity
+    try:
+        # 1. Total geometric penalty is the absolute sum of all three distinct dimensions.
+        # Note: Engines intrinsically cap their own outputs at DIMENSION_CAP internally 
+        # prior to passing values to this function.
+        # Here we cap them defensively just in case the engine didn't.
+        total_penalty = min(hard_penalty, DIMENSION_CAP) + min(drift_penalty, DIMENSION_CAP) + min(ml_penalty, DIMENSION_CAP)
+        
+        # 2. Mathematical application.
+        # The max(0, ...) boundary enforcement ensures the score cannot logically 
+        # drop below Absolute Zero into negative integer bounds, which would break UI.
+        new_score = max(0, float(current_score) - total_penalty)
+        
+        # 3. Request classification tier natively
+        severity = get_severity(new_score)
+        
+        # Rounding normalizes floating point artifacts before database storage
+        return round(new_score, 2), severity
+    except Exception as e:
+        logging.error(f"Error calculating trust score: {e}")
+        return current_score, get_severity(current_score)
 
 def apply_recovery(current_score):
     """
@@ -96,7 +93,11 @@ def apply_recovery(current_score):
     Returns:
         float: The healed score, capped cleanly at the structural max ceiling of 100.
     """
-    # The min(100, ...) boundary enforcement ensures the device cannot logically 
-    # accumulate "infinite trust" above a perfect 100 percent maximum.
-    recovered = min(100, current_score + RECOVERY_PER_CLEAN_HOUR)
-    return round(recovered, 2)
+    try:
+        # The min(100, ...) boundary enforcement ensures the device cannot logically 
+        # accumulate "infinite trust" above a perfect 100 percent maximum.
+        recovered = min(100, float(current_score) + RECOVERY_PER_CLEAN_HOUR)
+        return round(recovered, 2)
+    except Exception as e:
+        logging.error(f"Error applying recovery calculation: {e}")
+        return float(current_score)

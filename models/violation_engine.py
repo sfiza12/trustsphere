@@ -11,27 +11,13 @@
 # baseline adaptation to prevent model poisoning.
 # =============================================================================
 
-# -----------------------------------------------------------------------------
-# STATIC POLICY CONFIGURATION
-# -----------------------------------------------------------------------------
+import sys
+import os
+import logging
 
-# APPROVED_PORTS: A whitelist of explicitly authorized TCP/UDP ports for IoT devices.
-# Only traffic occurring over these specified ports is considered benign.
-APPROVED_PORTS = [80, 443, 8080, 22, 21]
-
-# APPROVED_IP_PREFIXES: Authorized internal networking subnets and specific safe external
-# IPs (e.g. 8.8.8.8 for Google DNS). If a device reaches outside this set, it is flagged.
-APPROVED_IP_PREFIXES = ['192.168.', '10.0.', '172.16.', '13.107.', '8.8.']
-
-# MAX_FAILED_CONNECTIONS: The absolute logical ceiling for connection timeouts 
-# or rejections in a single time window. Anything higher heavily implies port 
-# scanning, lateral movement mapping, or active brute-forcing.
-MAX_FAILED_CONNECTIONS = 50   
-
-# HARD_TRAFFIC_CAP: The absolute highest volume of packet transmission permissible.
-# Any device exceeding this limit is assumed to be participating in a DDoS attack,
-# suffering a catastrophic firmware loop failure, or exfiltrating data.
-HARD_TRAFFIC_CAP = 500        
+# Ensure we can import the config from the parent directory
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from config import APPROVED_PORTS, APPROVED_IP_PREFIXES, MAX_FAILED_CONNECTIONS, HARD_TRAFFIC_CAP        
 
 def check_violations(row):
     """
@@ -55,54 +41,60 @@ def check_violations(row):
     penalty = 0
     reasons = []
 
-    # -------------------------------------------------------------------------
-    # CHECK 1: PORT AUTHORIZATION
-    # -------------------------------------------------------------------------
-    port = int(row['port_used'])
-    if port not in APPROVED_PORTS:
-        penalty += 20
-        reasons.append(
-            f"Unauthorized port {port} detected. "
-            f"Device should only use explicitly approved architectural ports: {APPROVED_PORTS}."
-        )
+    try:
+        # -------------------------------------------------------------------------
+        # CHECK 1: PORT AUTHORIZATION
+        # -------------------------------------------------------------------------
+        port = int(row.get('port_used', -1))
+        if port not in APPROVED_PORTS:
+            penalty += 20
+            reasons.append(
+                f"Unauthorized port {port} detected. "
+                f"Device should only use explicitly approved architectural ports: {APPROVED_PORTS}."
+            )
 
-    # -------------------------------------------------------------------------
-    # CHECK 2: EXTERNAL IP REACHABILITY
-    # -------------------------------------------------------------------------
-    ip = str(row['destination_ip'])
-    # Iterates through the approved subnet list to see if the target IP string 
-    # begins with an approved prefix block
-    ip_approved = any(ip.startswith(prefix) for prefix in APPROVED_IP_PREFIXES)
-    
-    if not ip_approved:
-        penalty += 25
-        reasons.append(
-            f"Communication with unauthorized exterior IP {ip}. "
-            f"Device is actively attempting connections with unknown macroscopic addresses."
-        )
+        # -------------------------------------------------------------------------
+        # CHECK 2: EXTERNAL IP REACHABILITY
+        # -------------------------------------------------------------------------
+        ip = str(row.get('destination_ip', 'unknown'))
+        # Iterates through the approved subnet list to see if the target IP string 
+        # begins with an approved prefix block
+        ip_approved = any(ip.startswith(prefix) for prefix in APPROVED_IP_PREFIXES)
+        
+        if not ip_approved and ip != 'unknown':
+            penalty += 25
+            reasons.append(
+                f"Communication with unauthorized exterior IP {ip}. "
+                f"Device is actively attempting connections with unknown macroscopic addresses."
+            )
 
-    # -------------------------------------------------------------------------
-    # CHECK 3: CONNECTION FAILURE VELOCITY
-    # -------------------------------------------------------------------------
-    failed = int(row['failed_connections'])
-    if failed > MAX_FAILED_CONNECTIONS:
-        penalty += 15
-        reasons.append(
-            f"Excessive volumetric failed connections: {failed}. "
-            f"Policy ceiling is set at {MAX_FAILED_CONNECTIONS}. "
-            f"Highly indicative of aggressive network scanning or active brute-force execution attempt."
-        )
+        # -------------------------------------------------------------------------
+        # CHECK 3: CONNECTION FAILURE VELOCITY
+        # -------------------------------------------------------------------------
+        failed = int(row.get('failed_connections', 0))
+        if failed > MAX_FAILED_CONNECTIONS:
+            penalty += 15
+            reasons.append(
+                f"Excessive volumetric failed connections: {failed}. "
+                f"Policy ceiling is set at {MAX_FAILED_CONNECTIONS}. "
+                f"Highly indicative of aggressive network scanning or active brute-force execution attempt."
+            )
 
-    # -------------------------------------------------------------------------
-    # CHECK 4: DATA EXFILTRATION / DDOS HARD CEILING
-    # -------------------------------------------------------------------------
-    packets = float(row['packets_per_min'])
-    if packets > HARD_TRAFFIC_CAP:
-        penalty += 20
-        reasons.append(
-            f"Traffic volume ({packets} packets/min) radically exceeds standard policy cap bounds ({HARD_TRAFFIC_CAP}). "
-            f"Extreme anomalous bandwidth spike definitively detected."
-        )
+        # -------------------------------------------------------------------------
+        # CHECK 4: DATA EXFILTRATION / DDOS HARD CEILING
+        # -------------------------------------------------------------------------
+        packets = float(row.get('packets_per_min', 0.0))
+        if packets > HARD_TRAFFIC_CAP:
+            penalty += 20
+            reasons.append(
+                f"Traffic volume ({packets} packets/min) radically exceeds standard policy cap bounds ({HARD_TRAFFIC_CAP}). "
+                f"Extreme anomalous bandwidth spike definitively detected."
+            )
+    except Exception as e:
+        logging.error(f"Error evaluating hard violations: {e}")
+        # Fail safe if parsing crashes entirely
+        penalty += 5
+        reasons.append(f"Internal calculation parsing error during rule execution: {e}")
 
     # -------------------------------------------------------------------------
     # AGGREGATION & CAPPING

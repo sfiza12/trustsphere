@@ -10,23 +10,12 @@
 # by enforcing strict time-delay observation windows and hard violation blocking. 
 # =============================================================================
 
-# -----------------------------------------------------------------------------
-# ADAPTATION THRESHOLD CONSTANTS
-# -----------------------------------------------------------------------------
-# DRIFT_HOURS_BEFORE_CONFIRMATION: Defines how many consecutive temporal cycles 
-# of statistical drift must occur BEFORE the system even considers starting the 
-# observation/confirmation clock.
-DRIFT_HOURS_BEFORE_CONFIRMATION = 6
+import sys
+import os
+import logging
 
-# CONFIRMATION_HOURS_REQUIRED: Defines the length of the holding pattern 
-# observation window. The system will watch the device without penalizing it 
-# for drift for this duration. If completed successfully, the baseline officially shifts. 
-CONFIRMATION_HOURS_REQUIRED = 6
-
-# BASELINE_SHIFT_RATE: The smoothing factor. To prevent rapid manipulation, 
-# when a baseline updates, it does not instantly snap to the new drifted value. 
-# It only moves 10% (0.10) of the distance toward the new value in a single tick.
-BASELINE_SHIFT_RATE = 0.10
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from config import DRIFT_HOURS_BEFORE_CONFIRMATION, CONFIRMATION_HOURS_REQUIRED, BASELINE_SHIFT_RATE
 
 def should_update_baseline(device_row, current_packets, current_failed, 
                            current_unique_ips, has_hard_violation):
@@ -114,16 +103,20 @@ def calculate_new_baseline(old_baseline, current_value):
     if old_baseline is None:
         return current_value
     
-    # Calculate geometric absolute difference
-    difference = current_value - old_baseline
-    
-    # Calculate fraction of allowed movement
-    shift = difference * BASELINE_SHIFT_RATE
-    
-    # Append calculated shift delta to previous static baseline
-    new_baseline = old_baseline + shift
-    
-    return round(new_baseline, 2)
+    try:
+        # Calculate geometric absolute difference
+        difference = float(current_value) - float(old_baseline)
+        
+        # Calculate fraction of allowed movement
+        shift = difference * BASELINE_SHIFT_RATE
+        
+        # Append calculated shift delta to previous static baseline
+        new_baseline = float(old_baseline) + shift
+        
+        return round(new_baseline, 2)
+    except Exception as e:
+        logging.error(f"Error calculating new baseline: {e}")
+        return float(old_baseline) if old_baseline else 0.0
 
 def initialize_baseline(packets, failed, unique_ips):
     """
@@ -131,8 +124,16 @@ def initialize_baseline(packets, failed, unique_ips):
     Called explicitly ONLY on the very first chronological telemetry tick observed 
     for a globally unknown device MAC/Identifier. Establishes the Day-0 ground truth.
     """
-    return {
-        'baseline_packets': round(packets, 2),
-        'baseline_failed': round(failed, 2),
-        'baseline_unique_ips': round(unique_ips, 2) 
-    }
+    try:
+        return {
+            'baseline_packets': round(float(packets), 2),
+            'baseline_failed': round(float(failed), 2),
+            'baseline_unique_ips': round(float(unique_ips), 2) 
+        }
+    except Exception as e:
+        logging.error(f"Error initializing baseline: {e}")
+        return {
+            'baseline_packets': 0.0,
+            'baseline_failed': 0.0,
+            'baseline_unique_ips': 0.0
+        }
