@@ -1,55 +1,74 @@
-# TrustSphere 🛡️
-### IoT Behavioral Trust Analytics Platform
+# 🛡️ TrustSphere - IoT Trust Analytics
 
+**TrustSphere** is a live IoT Behavioral Trust Analytics platform designed to evaluate and dynamically map the security posture of thousands of interconnected devices across a network via Machine Learning mathematically. 
 
+## 🏗️ Architecture
 
-TrustSphere monitors IoT devices and assigns each a dynamic trust score (0-100) 
-based on behavioral analysis. It detects policy violations, behavioral drift, 
-and multi-parameter anomalies in real time.
+```mermaid
+graph TD
+    subgraph IoT Devices
+        A[Smart Thermostat]
+        B[Security Camera]
+        C[Sensor Hub]
+    end
+    
+    A & B & C -- MQTT Stream --> D
+    
+    subgraph Engine Orchestrator
+        D((HiveMQ Message Broker)) -- Live JSON --> E[Flask App]
+        E --> F[Hard Violation Engine]
+        E --> G[Drift Detection Engine]
+        E --> H[Machine Learning Isolation Forest]
+        
+        F & G & H -- Penalties --> I[Trust Score Generator]
+        I -- Score & Severity --> J[(PostgreSQL Database)]
+    end
+    
+    J -- REST API --> K[Vanilla Web Dashboard]
+```
 
----
+## ✨ Core Engines
+1. **Hard Violation Engine**: Validates raw packets against deterministic security ceilings.
+2. **Drift Detection Engine**: Computes normalized statistical shifts mathematically against previous standard behavior modes. 
+3. **ML Anomaly Forest**: Leverages Scikit-Learn `IsolationForest` instances specifically mapped and modeled dynamically for *each individual device's* signature.
+4. **Baseline Manager**: Controls observation windows dynamically. 
 
-## What It Does
+## 🚀 Setup & Installation (Local Development)
 
-- Scores every IoT device dynamically — 0 to 100
-- Detects hard policy violations immediately
-- Catches gradual behavioral drift over time
-- Uses ML to detect subtle multi-parameter anomalies
-- Explains every decision in plain English
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Backend | Python, Flask |
-| Database | SQLite |
-| ML | scikit-learn, Isolation Forest |
-| Frontend | HTML, CSS, JavaScript |
-
----
-
-## How To Run
+### 1. Requirements Installation
 ```bash
-# Clone the repo
-git clone https://github.com/YOURUSERNAME/trustsphere.git
+git clone https://github.com/sfiza12/trustsphere.git
 cd trustsphere
-
-# Create virtual environment
-python -m venv venv
-venv\Scripts\activate
-
-# Install dependencies
 pip install -r requirements.txt
+```
 
-# Run the app
+### 2. Configuration (`config.yaml`)
+By default, TrustSphere ships with a local `sqlite3` database engine mathematically mapped for instant plug-and-play validation. For production hardening, point `database_uri` to a PostgreSQL cluster (like Neon.tech).
+```yaml
+# In config.yaml
+database_uri: "sqlite:///trustsphere.db" # Or postgresql://...
+mqtt_broker: "broker.hivemq.com"
+```
+
+### 3. Launch Core Server
+```bash
 python app.py
 ```
 
-Open browser at `http://127.0.0.1:5000`
+### 4. Inject Mock Hackathon Traffic 
+In a separate terminal, launch the `demo_publisher.py` to trigger live MQTT attacks against the system dynamically while you show the dashboard.
+```bash
+python scripts/demo_publisher.py
+```
+
+## 📡 API Endpoints 
+
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| `GET` | `/api/devices` | Returns a compiled JSON list of all active systems sorted by vulnerability descending. | `Yes` |
+| `GET` | `/api/device/<id>` | Grabs the temporal array metrics and the absolute raw telemetry batch associated with the target device. | `Yes` |
+| `GET` | `/api/explain/<id>?view=current` | Returns the deeply nested JSON payload isolating precisely *why* a trust score was degraded mathematically. | `Yes` |
+| `POST` | `/api/reset` | Purges the entire database tracking history sequentially (Admin Use Only). | `Yes` |
 
 ---
-
-## Project Status
-🚧 Work in progress — converting hackathon prototype to full project
+*Built securely for the Eclipse Hackathon dynamically.*
