@@ -1,48 +1,59 @@
-import paho.mqtt.client as mqtt  # type: ignore
 import json
-import pandas as pd  # type: ignore
 import logging
-from config import MQTT_BROKER, MQTT_PORT, MQTT_TOPIC  # type: ignore
+import pandas as pd
+import threading
+import paho.mqtt.client as mqtt
 
-def on_connect(client, userdata, flags, rc):
-    if rc == 0:
-        logging.info(f"Connected to MQTT broker at {MQTT_BROKER}")
-        client.subscribe(MQTT_TOPIC)
-    else:
-        logging.error(f"Failed to connect to MQTT broker, return code {rc}")
+BROKER = "broker.hivemq.com"
+PORT = 1883
+TOPIC = "trustsphere/telemetry"
 
-def on_message(client, userdata, msg):
-    try:
-        payload = msg.payload.decode('utf-8')
-        data = json.loads(payload)
-        
-        if not isinstance(data, list):
-            data = [data]
-            
-        df = pd.DataFrame(data)
-        
-        # Execute the main orchestrator callback securely
-        if 'callback' in userdata:
-            userdata['callback'](df)
-            
-    except Exception as e:
-        logging.error(f"Error processing MQTT message: {e}")
-
-def start_mqtt_listener(telemetry_callback):
+def start_mqtt_listener(process_telemetry_fn):
     """
-    Initializes and starts the background MQTT loop.
-    Connects to the broker defined in config and routes new messages directly into the pipeline.
+    Spawns a background daemon thread that connects to the MQTT broker
+    and continuously listens for incoming telemetry data without blocking Flask.
     """
-    client = mqtt.Client(userdata={'callback': telemetry_callback})
-    client.on_connect = on_connect
-    client.on_message = on_message
-    
-    try:
-        client.connect(MQTT_BROKER, MQTT_PORT, 60)
-        # loop_start() handles reconnection and network traffic in a background thread implicitly
-        client.loop_start()
-        logging.info("MQTT Listener started successfully.")
-        return client
-    except Exception as e:
-        logging.error(f"Failed to start MQTT listener: {e}")
-        return None
+    def on_connect(client, userdata, flags, rc):
+        if rc == 0:
+            logging.info(f"Successfully connected to MQTT broker at {BROKER}:{PORT}")
+            client.subscribe(TOPIC)
+        else:
+            logging.error(f"Failed to connect to MQTT broker, return code {rc}")
+
+    def on_message(client, userdata, msg):
+        try:
+            payload = json.loads(msg.payload.decode('utf-8'))
+            
+            # Map standard payload to pandas DataFrame
+            row_data = {
+                'device_id': [payload.get('device_id')],
+                'timestamp': [payload.get('timestamp')],
+                'packets_per_min': [payload.get('packets_per_min')],
+                'port_used': [payload.get('port_used')],
+                'destination_ip': [payload.get('destination_ip')],
+                'failed_connections': [payload.get('failed_connections')]
+            }
+            
+            df = pd.DataFrame(row_data)
+            
+            # Flow dataframe into the primary orchestration core
+            process_telemetry_fn(df)
+            
+        except Exception as e:
+            logging.error(f"Error processing MQTT message: {e}")
+
+    def loop_in_thread():
+        client = mqtt.Client()
+        client.on_connect = on_connect
+        client.on_message = on_message
+
+        try:
+            client.connect(BROKER, PORT, 60)
+            client.loop_forever()
+        except Exception as e:
+            logging.error(f"MQTT connection forcefully refused or unavailable: {e}")
+            # Fails gracefully without taking down the core Flask process.
+
+    # Launch daemon thread
+    thread = threading.Thread(target=loop_in_thread, daemon=True)
+    thread.start()

@@ -425,7 +425,7 @@ def process_telemetry(df):
             # Only invoke training overhead if we have a substantial enough data window (>10)
             # to prevent model overfitting on microscopic spikes.
             if len(training_features) >= 10:
-                train_model(training_features)
+                train_model(training_features, device_id=device_id)
 
 
             # ---------------------------------------------------------------------
@@ -525,7 +525,7 @@ def process_telemetry(df):
                         mode = "NORMAL"
                     elif new_streak < SUSTAINED_HOURS:
                         mode = "DRIFT DETECTED"
-                    elif new_confirmation >= 3:
+                    elif new_confirmation >= CONFIRMATION_HOURS_REQUIRED:
                         mode = "BASELINE UPDATED"
                     else:
                         mode = "BASELINE CONFIRMATION"
