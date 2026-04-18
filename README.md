@@ -27,6 +27,7 @@ and subtle multi-parameter anomalies using machine learning.
 ---
 
 ## 🏗️ Architecture
+```text
 IoT Devices / MQTT Publisher
 ↓
 HiveMQ Broker
@@ -49,6 +50,7 @@ process_telemetry()                 |
 SQLite Database                     |
 ↓                              |
 REST API → Dashboard ───────────────┘
+```
 
 ---
 
@@ -101,6 +103,7 @@ Watch the dashboard update automatically every 5 seconds.
 ---
 
 ## 📁 Project Structure
+```text
 trustsphere/
 ├── app.py                  # Main Flask app and processing pipeline
 ├── config.py               # Config loader
@@ -131,6 +134,7 @@ trustsphere/
 │   └── stage4.csv          # Demo telemetry — hours 18-23
 └── static/
 └── .gitkeep
+```
 
 ---
 
